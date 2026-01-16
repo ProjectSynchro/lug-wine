@@ -70,18 +70,19 @@ prepare_preset() {
   esac
 
   if [ "$build_type" = "proton" ]; then
-    # Proton builds: copy proton-tkg directory contents (not as subdirectory)
+    # Proton builds: proton-tkg.sh expects wine-tkg-git to be at ../wine-tkg-git
+    # So we copy the entire wine-tkg-git structure and cd into proton-tkg
     mkdir -p "$TMP_BUILD_DIR"
-    cp -a "$PROTON_TKG_SRC"/* "$TMP_BUILD_DIR/"
+    cp -a "$WINE_TKG_SRC"/* "$TMP_BUILD_DIR/"
     echo "Created temporary build directory: $TMP_BUILD_DIR"
 
-    # Copy config to TMP_BUILD_DIR (same as wine builds)
-    cp "$SCRIPT_DIR/config/$config" "$TMP_BUILD_DIR/"
+    # Copy config to proton-tkg subdirectory
+    cp "$SCRIPT_DIR/config/$config" "$TMP_BUILD_DIR/proton-tkg/"
 
     # Create tarplz file to trigger tarball output instead of Steam installation
-    touch "$TMP_BUILD_DIR/tarplz"
+    touch "$TMP_BUILD_DIR/proton-tkg/tarplz"
 
-    cd "$TMP_BUILD_DIR"
+    cd "$TMP_BUILD_DIR/proton-tkg"
 
     mkdir -p ./proton-tkg-userpatches
     for file in "${patches[@]}"; do
@@ -122,7 +123,8 @@ build_lug_wine() {
 
 build_lug_proton() {
   # proton-tkg.sh accepts a config path as $1 to set _EXT_CONFIG_PATH
-  yes|./proton-tkg.sh "$TMP_BUILD_DIR/$config"
+  # We're in $TMP_BUILD_DIR/proton-tkg, config was copied here
+  yes|./proton-tkg.sh "./$config"
   echo "Proton build completed successfully."
 }
 
