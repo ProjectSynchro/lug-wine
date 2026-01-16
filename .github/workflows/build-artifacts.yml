@@ -75,8 +75,6 @@ jobs:
 
   build-proton:
     runs-on: ubuntu-latest
-    env:
-      XDG_CACHE_HOME: /tmp/.cache
     steps:
       - name: Free Disk Space
         uses: LizardByte/actions/actions/more_space@master
