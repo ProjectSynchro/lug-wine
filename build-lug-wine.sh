@@ -84,12 +84,14 @@ prepare_preset() {
 
     cd "$TMP_BUILD_DIR/proton-tkg"
 
-    mkdir -p ./proton-tkg-userpatches
+    # Wine patches go to wine-tkg-git/wine-tkg-userpatches (not proton-tkg-userpatches)
+    # proton-tkg-userpatches is for proton-specific patches (.myprotonpatch)
+    mkdir -p "$TMP_BUILD_DIR/wine-tkg-git/wine-tkg-userpatches"
     for file in "${patches[@]}"; do
-      cp "$PATCHES_DIR/$file.patch" "./proton-tkg-userpatches/${file}.mypatch"
+      cp "$PATCHES_DIR/$file.patch" "$TMP_BUILD_DIR/wine-tkg-git/wine-tkg-userpatches/${file}.mypatch"
     done
 
-    echo "Copied LUG patches to ./proton-tkg-userpatches/"
+    echo "Copied LUG patches to wine-tkg-git/wine-tkg-userpatches/"
 
   else
     # Wine builds: copy wine-tkg-git directory contents
