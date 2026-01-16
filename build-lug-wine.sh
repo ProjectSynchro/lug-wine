@@ -142,6 +142,10 @@ build_lug_wine() {
 build_lug_proton() {
   # proton-tkg.sh accepts a config path as $1 to set _EXT_CONFIG_PATH
   # We're in $TMP_BUILD_DIR/proton-tkg, config was copied here
+  
+  # Force Docker container usage for Sniper runtime
+  sed -i 's/_no_container="true"/_no_container="false"/' proton-tkg.sh
+  
   yes|./proton-tkg.sh "./$config"
   echo "Proton build completed successfully."
 }
