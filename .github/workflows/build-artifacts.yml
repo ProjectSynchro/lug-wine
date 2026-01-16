@@ -40,6 +40,9 @@ jobs:
           - os: ubuntu
             image: ubuntu:22.04
             preset: staging-default
+          - os: ubuntu
+            image: ubuntu:22.04
+            preset: proton-default
     container:
       image: ${{ matrix.image }}
     env:
@@ -62,9 +65,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+      - name: Setup Rust (for Proton builds)
+        if: contains(matrix.preset, 'proton')
+        shell: bash {0}
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          source "$HOME/.cargo/env"
+          rustup target add i686-unknown-linux-gnu
       - name: Compilation
         shell: bash {0}
         run: |
+          if [[ -f "$HOME/.cargo/env" ]]; then
+            source "$HOME/.cargo/env"
+          fi
           echo "$WINE_VERSION" "$LUG_REV"
           ./build-lug-wine.sh --preset "${{ matrix.preset }}" --version "$WINE_VERSION" --revision "$LUG_REV"
       - name: Upload Archive
