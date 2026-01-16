@@ -19,8 +19,8 @@ lug_rev="-1"
 build_type="wine"
 
 
-patches=("10.2+_eac_fix"
-         "eac_locale"
+# Common patches applied to BOTH Wine and Proton builds
+common_patches=("eac_locale"
          "dummy_dlls"
          "enables_dxvk-nvapi"
          "nvngx_dlls"
@@ -35,6 +35,16 @@ patches=("10.2+_eac_fix"
          "sc_gpumem"
 )
 
+# Patches specific to Wine builds (includes common patches)
+wine_patches=("10.2+_eac_fix" "${common_patches[@]}")
+
+# Patches specific to Proton builds (includes common patches)
+# Currently excludes 10.2+_eac_fix as requested
+proton_patches=("${common_patches[@]}")
+
+# Temporary patches passed via --adhoc argument
+adhoc_patches=()
+
 cleanup() {
   rm -rf "$TMP_BUILD_DIR"
   echo "Cleaned up temporary build directory."
@@ -43,7 +53,7 @@ trap cleanup EXIT
 
 parse_adhoc() {
   IFS=',' read -r -a adhoc <<< "$1"
-  patches+=("${adhoc[@]}")
+  adhoc_patches+=("${adhoc[@]}")
 }
 
 # prepare preset
@@ -68,6 +78,12 @@ prepare_preset() {
       exit $invalid_args
       ;;
   esac
+
+  if [ "$build_type" = "proton" ]; then
+    patches=("${proton_patches[@]}" "${adhoc_patches[@]}")
+  else
+    patches=("${wine_patches[@]}" "${adhoc_patches[@]}")
+  fi
 
   if [ "$build_type" = "proton" ]; then
     # Proton builds: proton-tkg.sh expects wine-tkg-git to be at ../wine-tkg-git
