@@ -4,6 +4,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WINE_TKG_SRC="$SCRIPT_DIR/wine-tkg-git"
+PROTON_TKG_SRC="$SCRIPT_DIR/wine-tkg-git/proton-tkg"
 PATCHES_DIR="$SCRIPT_DIR/patches/wine"
 TMP_BUILD_DIR="$SCRIPT_DIR/wine-tkg-build-tmp-$(mktemp -u XXXXXX)"
 
@@ -15,6 +16,8 @@ invalid_args=-1
 preset="default"
 wine_version=""
 lug_rev="-1"
+build_type="wine"
+
 
 patches=("10.2+_eac_fix"
          "eac_locale"
@@ -56,55 +59,128 @@ prepare_preset() {
       export config="lug-wine-tkg-staging-wayland.cfg"
       parse_adhoc "default-to-wayland"
       ;;
+    proton-default)
+      export config="lug-proton-tkg-default.cfg"
+      build_type="proton"
+      ;;
     *)
-      echo "Usage: $0 {default|staging-default|staging-wayland} [build args...]"
+      echo "Usage: $0 {default|staging-default|staging-wayland|proton-default} [build args...]"
       exit $invalid_args
       ;;
   esac
 
-  cp -a "$WINE_TKG_SRC/wine-tkg-git" "$TMP_BUILD_DIR/"
-  echo "Created temporary build directory: $TMP_BUILD_DIR"
+  if [ "$build_type" = "proton" ]; then
+    # Proton builds: copy proton-tkg directory contents (not as subdirectory)
+    mkdir -p "$TMP_BUILD_DIR"
+    cp -a "$PROTON_TKG_SRC"/* "$TMP_BUILD_DIR/"
+    echo "Created temporary build directory: $TMP_BUILD_DIR"
 
-  cp "./config/$config" "$TMP_BUILD_DIR"
+    # Copy config to TMP_BUILD_DIR (same as wine builds)
+    cp "$SCRIPT_DIR/config/$config" "$TMP_BUILD_DIR/"
 
-  cd "$TMP_BUILD_DIR"
+    # Create tarplz file to trigger tarball output instead of Steam installation
+    touch "$TMP_BUILD_DIR/tarplz"
 
-  mkdir -p ./wine-tkg-userpatches
-  for file in "${patches[@]}"; do
-    cp "$PATCHES_DIR/$file.patch" "./wine-tkg-userpatches/${file}.mypatch"
-  done
+    cd "$TMP_BUILD_DIR"
 
-  echo "Copied LUG patches to ./wine-tkg-userpatches/"
+    mkdir -p ./proton-tkg-userpatches
+    for file in "${patches[@]}"; do
+      cp "$PATCHES_DIR/$file.patch" "./proton-tkg-userpatches/${file}.mypatch"
+    done
 
-  if [ -n "$wine_version" ]; then
-    sed -i "s/staging_version=\"\"/staging_version=\"v$wine_version\"/" "$TMP_BUILD_DIR/$config"
-    sed -i "s/plain_version=\"\"/plain_version=\"wine-$wine_version\"/" "$TMP_BUILD_DIR/$config"
+    echo "Copied LUG patches to ./proton-tkg-userpatches/"
+
+  else
+    # Wine builds: copy wine-tkg-git directory contents
+    mkdir -p "$TMP_BUILD_DIR"
+    cp -a "$WINE_TKG_SRC/wine-tkg-git"/* "$TMP_BUILD_DIR/"
+    echo "Created temporary build directory: $TMP_BUILD_DIR"
+
+    cp "$SCRIPT_DIR/config/$config" "$TMP_BUILD_DIR/"
+
+    cd "$TMP_BUILD_DIR"
+
+    mkdir -p ./wine-tkg-userpatches
+    for file in "${patches[@]}"; do
+      cp "$PATCHES_DIR/$file.patch" "./wine-tkg-userpatches/${file}.mypatch"
+    done
+
+    echo "Copied LUG patches to ./wine-tkg-userpatches/"
+
+    if [ -n "$wine_version" ]; then
+      sed -i "s/staging_version=\"\"/staging_version=\"v$wine_version\"/" "$TMP_BUILD_DIR/$config"
+      sed -i "s/plain_version=\"\"/plain_version=\"wine-$wine_version\"/" "$TMP_BUILD_DIR/$config"
+    fi
   fi
 }
+
 
 build_lug_wine() {
   yes|./non-makepkg-build.sh --config "$TMP_BUILD_DIR/$config" "$@"
   echo "Build completed successfully."
 }
 
+build_lug_proton() {
+  # proton-tkg.sh accepts a config path as $1 to set _EXT_CONFIG_PATH
+  yes|./proton-tkg.sh "$TMP_BUILD_DIR/$config"
+  echo "Proton build completed successfully."
+}
+
+
 package_artifact() {
   echo "Packaging build artifact..."
-  local workdir lug_name archive_path
-  local built_dir
-  built_dir="$(find ./non-makepkg-builds -maxdepth 1 -type d -name 'wine-*' -printf '%f\n' | head -n1)"
-  if [[ -z "$built_dir" ]]; then
-    echo "No build directory found in non-makepkg-builds/"
-    exit 1
+  local lug_name archive_path built_dir
+
+  if [ "$build_type" = "proton" ]; then
+    # Proton builds output to built/ directory as .tar files
+    built_dir="$(find ./built -maxdepth 1 -type d -name 'proton_tkg_*' -printf '%f\n' | head -n1)"
+    if [[ -z "$built_dir" ]]; then
+      # Check if there's a tarball instead (proton-tkg creates tar when tarplz exists)
+      local built_tar
+      built_tar="$(find ./built -maxdepth 1 -type f -name 'proton_tkg_*.tar' -printf '%f\n' | head -n1)"
+      if [[ -z "$built_tar" ]]; then
+        echo "No build directory or tarball found in built/"
+        exit 1
+      fi
+      # Rename the existing tarball
+      local version_part
+      version_part="${built_tar#proton_tkg_}"
+      version_part="${version_part%.tar}"
+      lug_name="lug-proton-${version_part}${lug_rev}"
+      mkdir -p "$SCRIPT_DIR/output"
+      mv "./built/$built_tar" "$SCRIPT_DIR/output/${lug_name}.tar"
+      gzip "$SCRIPT_DIR/output/${lug_name}.tar"
+      echo "Build artifact collected in $SCRIPT_DIR/output/${lug_name}.tar.gz"
+      return
+    fi
+    local version_part
+    version_part="${built_dir#proton_tkg_}"
+    lug_name="lug-proton-${version_part}${lug_rev}"
+    archive_path="/tmp/lug-proton-tkg/${lug_name}.tar.gz"
+    mkdir -p "$(dirname "$archive_path")"
+    mv "./built/$built_dir" "./built/$lug_name"
+    tar --remove-files -czf "$archive_path" -C "./built" "$lug_name"
+    mkdir -p "$SCRIPT_DIR/output"
+    mv "$archive_path" "$SCRIPT_DIR/output/"
+    echo "Build artifact collected in $SCRIPT_DIR/output/${lug_name}.tar.gz"
+  else
+    # Wine builds output to non-makepkg-builds/
+    built_dir="$(find ./non-makepkg-builds -maxdepth 1 -type d -name 'wine-*' -printf '%f\n' | head -n1)"
+    if [[ -z "$built_dir" ]]; then
+      echo "No build directory found in non-makepkg-builds/"
+      exit 1
+    fi
+    lug_name="lug-$(echo "$built_dir" | cut -d. -f1-2)${lug_rev}"
+    archive_path="/tmp/lug-wine-tkg/${lug_name}.tar.gz"
+    mkdir -p "$(dirname "$archive_path")"
+    mv "./non-makepkg-builds/$built_dir" "./non-makepkg-builds/$lug_name"
+    tar --remove-files -czf "$archive_path" -C "./non-makepkg-builds" "$lug_name"
+    mkdir -p "$SCRIPT_DIR/output"
+    mv "$archive_path" "$SCRIPT_DIR/output/"
+    echo "Build artifact collected in $SCRIPT_DIR/output/${lug_name}.tar.gz"
   fi
-  lug_name="lug-$(echo "$built_dir" | cut -d. -f1-2)${lug_rev}"
-  archive_path="/tmp/lug-wine-tkg/${lug_name}.tar.gz"
-  mkdir -p "$(dirname "$archive_path")"
-  mv "./non-makepkg-builds/$built_dir" "./non-makepkg-builds/$lug_name"
-  tar --remove-files -czf "$archive_path" -C "./non-makepkg-builds" "$lug_name"
-  mkdir -p "$SCRIPT_DIR/output"
-  mv "$archive_path" "$SCRIPT_DIR/output/"
-  echo "Build artifact collected in $SCRIPT_DIR/output/${lug_name}.tar.gz"
 }
+
 
 usage() {
   printf "Linux Users Group Wine Build Script\n
@@ -113,7 +189,9 @@ Usage: ./build-lug-wine <options>
   -h, --help                    Display this help message and exit
   -v, --version                 Wine version to build e.g. "10.23" (default: latest git)
   -a, --adhoc                   Comma-separated list of adhoc patches to apply
-  -p, --preset                  Select a preset configuration (default|staging-default)
+  -p, --preset                  Select a preset configuration:
+                                  Wine:   default, staging-default, staging-wayland
+                                  Proton: proton-default
   -o, --output                  Output directory for the build artifact (default: ./output)
   -r, --revision                Revision number for the build (default: 1)
 "
@@ -157,5 +235,9 @@ if [ "$#" -gt 0 ]; then
 fi
 
 prepare_preset
-build_lug_wine
+if [ "$build_type" = "proton" ]; then
+  build_lug_proton
+else
+  build_lug_wine
+fi
 package_artifact
